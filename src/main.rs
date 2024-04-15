@@ -3,13 +3,13 @@ use std::thread;
 use image::io::Reader;
 use image::{DynamicImage, GenericImageView};
 mod otp;
-use anyhow::{Error, Ok, Result};
+use anyhow::{Ok, Result};
 use std::path::Path;
 mod err;
 use snafu::prelude::*;
 use url::Url;
-
-
+mod storage;
+use crate::storage::get_pass;
 #[derive(Debug, Snafu)]
 enum OtpError {
     #[snafu(display("URI didn't contain a label: {err}"))]
@@ -22,6 +22,8 @@ enum OtpError {
     NotOtpLink{err: String},
     #[snafu(display("URI didn't contain a otp type: {err}"))]
     CannotIdentifyOtpType{err: String},
+    #[snafu(display("QR code could not be parsed, try a simpler one with no images."))]
+    CannotParseQR,
 }
 
 
@@ -53,11 +55,14 @@ struct TOTP {
 
 
 fn main() -> Result<(), anyhow::Error> {
-    let mut lol = Reader::open("/home/adi/code/ROTP/src/Screenshot_20240323_110510.png")?.with_guessed_format()?.decode()?;
+
+    
+    get_pass(&"lol".to_string());
+    let mut lol = Reader::open("/home/adi/code/ROTP/src/canvas.png")?.with_guessed_format()?.decode()?;
 
 
     let mut key = "BASE32SECRET3232";
-    let uri = decode_qr(&mut lol).unwrap();
+    let uri = decode_qr(&mut lol)?;
     parse_uri(&uri);
     Ok(())
 }
@@ -66,7 +71,11 @@ fn decode_qr(img: &mut DynamicImage) -> Result<String, anyhow::Error> {
     let decoder = bardecoder::default_decoder();
 
     let results = decoder.decode(&img.clone());
-    Ok(results[0].as_ref().clone().unwrap().to_string())
+    if results.is_empty() {
+        Err(OtpError::CannotParseQR.into())
+    } else {
+        Ok(results[0].as_ref().clone().unwrap().to_string())
+    }
 }
 
 fn parse_uri(uri: &String) -> Result<()> {
