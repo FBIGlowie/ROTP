@@ -7,7 +7,6 @@ use rpassword::*;
 use snafu::prelude::*;
 use std::io::BufReader;
 use std::io::Cursor;
-use std::io::ErrorKind;
 use std::{env, path::PathBuf};
 use std::{
     env::VarError,
@@ -26,7 +25,7 @@ enum StorageError {
     BadDBName { err: String },
 }
 
-struct DB {
+pub struct DB {
     path: PathBuf,
     archive_handle: Archive<Cursor<Vec<u8>>>,
     name: String,
@@ -73,13 +72,17 @@ if env_path.contains(".tar.rotp"){
         }
     }
 
-    fn opendb(mut self, pass: Secret<String>) {
+    fn opendb(mut self, pass: Secret<String>) -> bool { //as of now, this will only pass out the data from the secrets file, in the future there may be images inside too
         let mut encrypted_archive = File::open(self.path).unwrap(); //opens a file handle than opens a archine handle
         let mut decrypted_archive = DB::decrypt(pass, std::io::BufReader::new(encrypted_archive)).unwrap();
         //now we can get a tar handle
         let mut archive = Archive::new(std::io::Cursor::new(decrypted_archive));
         //confirm the secrets file exists
-        
+        for entry in archive.entries()? {
+            if entry.unwrap().path().unwrap().to_str().unwrap() == "secrets.toml" {
+
+            }
+        }
        // Ok(archive)
     }
     fn encrypt(pass: Secret<String>, data: Vec<u8>) -> Result<(Vec<u8>)> {
@@ -121,49 +124,12 @@ pub fn get_pass(dir: &String) -> Result<(Secret<String>)> {
 // make age decrypted
 //make tar reader that outputs stream
 
-fn onboarding() {
-    // this function either done at which the app is first run or not
-    let mut default_path: &str = "~/.rotp/";
-    let dir_maker = std::fs::DirBuilder::new();
-    dir_maker.create(default_path);
-    println!("Welsome to ROTP onboarding");
-    let db_name = Text::new("Please specify database path").prompt().unwrap();
-    let mut pass;
-    loop {
-        //password vefiticvatio
-        let unverified_pass =
-            rpassword::prompt_password(format!("Please type the database password")).unwrap();
-        if unverified_pass
-            != rpassword::prompt_password(format!("Please verify the password")).unwrap()
-        {
-            drop(unverified_pass); //drop the unverified one for extra secuity
-            continue;
-        } else {
-            pass = Secret::new(unverified_pass);
-            break;
-        }
-    }
-    let mut database_file =
-        std::fs::File::create(format!("{}{}.tar.rotp", default_path, db_name)).unwrap(); //create file for new tarball
-    let mut tarball_data = vec![];
-    let mut new_archive = Builder::new(tarball_data);
-    let secrets_header = &create_tar_header("secrets.toml", "[secrets]".as_bytes().len() as u64);
-    new_archive.append(secrets_header, "[secrets]".as_bytes()); //adding our secrets file, which is just contains toml table secrets
 
-    database_file
-        .write_all(&DB::encrypt(pass, tarball_data.clone()).unwrap())
-        .unwrap(); // encrypt and write to file
-    database_file.flush();
 
-    //finally set the env var
-    let final_path = format!("{}{}.rotp", default_path, db_name);
-    env::set_var("ROTP_DB", final_path);
-}
-
-fn create_tar_header<S>(name: S, size: u64) -> Header {
+fn create_tar_header<S: std::convert::AsRef<std::path::Path>>(name: S, size: u64) -> Header {
     //tar header for our secrets file
     let mut header = Header::new_gnu();
-    header.set_path("secrets.toml").unwrap();
+    header.set_path(name).unwrap();
     header.set_size(size); // Set the file size to size param
     let now = std::time::SystemTime::now();
     header.set_mtime(
