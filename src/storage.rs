@@ -23,6 +23,8 @@ enum StorageError {
     DatabaseNotFound { err: String },
     #[snafu(display("ENV var does not contain valid database name (must end with .tar.rotp): {err}"))]
     BadDBName { err: String },
+    #[snafu(display("Database is invalid: {err}"))]
+    InvalidDB { err: String },
 }
 
 pub struct DB {
@@ -72,18 +74,24 @@ if env_path.contains(".tar.rotp"){
         }
     }
 
-    fn opendb(mut self, pass: Secret<String>) -> bool { //as of now, this will only pass out the data from the secrets file, in the future there may be images inside too
+    fn opendb(mut self, pass: Secret<String>) -> Result<bool> { //as of now, this will only pass out the data from the secrets file, in the future there may be images inside too
         let mut encrypted_archive = File::open(self.path).unwrap(); //opens a file handle than opens a archine handle
         let mut decrypted_archive = DB::decrypt(pass, std::io::BufReader::new(encrypted_archive)).unwrap();
         //now we can get a tar handle
         let mut archive = Archive::new(std::io::Cursor::new(decrypted_archive));
         //confirm the secrets file exists
+        let mut secrets_found = false;
         for entry in archive.entries()? {
             if entry.unwrap().path().unwrap().to_str().unwrap() == "secrets.toml" {
-
+                secrets_found = true;
             }
         }
+        if !secrets_found {
+            return Err(StorageError::InvalidDB { err: "secrets.toml not found".to_string() }.into())
+        }
+        
        // Ok(archive)
+       Ok((true))
     }
     fn encrypt(pass: Secret<String>, data: Vec<u8>) -> Result<(Vec<u8>)> {
         //consumes the password

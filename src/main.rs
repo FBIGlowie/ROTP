@@ -26,11 +26,43 @@ enum OtpError {
     CannotParseQR,
 }
 
+#[derive(Debug)]
+enum OTP {
+    HOTP(HOTP),
+    TOTP(TOTP)
+}
+
+impl OTP {
+    fn parse_uri(uri: &String) -> Result<(OTP)> {
+        let url = Url::parse(uri).expect("Failed to parse URL");
+    
+        if uri.contains("otpauth://") {
+            let mut path_segments = url.path_segments().expect("Failed to get path segments");
+    
+            // The label is the first path segment after "totp/"
+            let label = path_segments.next().expect("Failed to get label");
+    
+            if uri.contains("totp") {
+                let mut totp = TOTP::new(&uri, &url, label.to_string(), "/wip".to_string()).unwrap();
+                return Ok(OTP::TOTP(totp))
+            } else {
+                let mut hotp =
+                    HOTP::new(&uri, &url, label.to_string(), "/wip".to_string(), 1000).unwrap();
+                return Ok(OTP::HOTP(hotp))
+                }
+        } else {
+            Err((OtpError::NotOtpLink{ err: "failed at parse_uri".to_string()}).into())
+        }
+    }
+}
+#[derive(Debug)]
 enum Algo {
     SHA1,
     SHA256,
     SHA512,
 }
+#[derive(Debug)]
+
 struct HOTP {
     secret: String,
     label: String,
@@ -41,6 +73,60 @@ struct HOTP {
     img_path: String,
 }
 
+impl HOTP {
+    fn new(
+        uri: &String,
+        url: &Url,
+        label: String,
+        img_path: String,
+        counter: u64,
+    ) -> Result<HOTP> {
+        let uri = uri.clone();
+        let url = url.clone();
+        let mut algo;
+        println!(
+            "{}",
+            format!(
+                "{}",
+                url.query_pairs()
+                    .find(|(key, _)| key == "algorithm")
+                    .map(|(_, value)| value.to_string())
+                    .unwrap_or("SHA1".to_owned())
+                    .as_str()
+            )
+        );
+        match url
+            .query_pairs()
+            .find(|(key, _)| key == "algorithm")
+            .map(|(_, value)| value.to_string())
+            .unwrap_or("SHA1".to_owned())
+            .as_str()
+        {
+            _ => algo = Algo::SHA1,
+            "SHA1" => algo = Algo::SHA1,
+            "SHA256" => algo = Algo::SHA256,
+            "SHA512" => algo = Algo::SHA512,
+        }
+        Ok(HOTP {
+            secret: url
+                .query_pairs()
+                .find(|(key, _)| key == "secret")
+                .map(|(_, value)| value.to_string())
+                .unwrap(),
+            label: label.clone(),
+            issuer: url
+                .query_pairs()
+                .find(|(key, _)| key == "issuer")
+                .map(|(_, value)| value.to_string())
+                .unwrap_or(label),
+            algo,
+            counter,
+            full_uri: uri,
+            img_path,
+        })
+    }
+}
+#[derive(Debug)]
 struct TOTP {
     secret: String,
     label: String,
@@ -51,16 +137,50 @@ struct TOTP {
     img_path: String,
 }
 
-fn main() -> Result<(), anyhow::Error> {
-    get_pass(&"lol".to_string());
-    let mut lol = Reader::open("/home/adi/code/ROTP/src/canvas.png")?
-        .with_guessed_format()?
-        .decode()?;
-
-    let mut key = "BASE32SECRET3232";
-    let uri = decode_qr(&mut lol)?;
-    parse_uri(&uri);
-    Ok(())
+impl TOTP {
+    fn new(uri: &String, url: &Url, label: String, img_path: String) -> Result<TOTP> {
+        let uri = uri.clone();
+        let url = url.clone();
+        let mut algo;
+        match url
+            .query_pairs()
+            .find(|(key, _)| key == "algorithm")
+            .map(|(_, value)| value.to_string())
+            .unwrap_or("SHA1".to_owned())
+            .as_str()
+        {
+            _ => algo = Algo::SHA1,
+            "SHA1" => algo = Algo::SHA1,
+            "SHA256" => algo = Algo::SHA256,
+            "SHA512" => algo = Algo::SHA512,
+        }
+    
+        let totp = TOTP {
+            secret: url
+                .query_pairs()
+                .find(|(key, _)| key == "secret")
+                .map(|(_, value)| value.to_string())
+                .unwrap(),
+            label: label.clone(),
+            issuer: url
+                .query_pairs()
+                .find(|(key, _)| key == "issuer")
+                .map(|(_, value)| value.to_string())
+                .unwrap_or(label),
+            algo,
+            step: url
+                .query_pairs()
+                .find(|(key, _)| key == "period")
+                .map(|(_, value)| value.to_string())
+                .unwrap_or("30".to_string())
+                .parse::<u32>()
+                .unwrap_or(30),
+            full_uri: uri,
+            img_path,
+        };
+        Ok(totp)
+    }
+    
 }
 
 fn decode_qr(img: &mut DynamicImage) -> Result<String, anyhow::Error> {
@@ -74,120 +194,23 @@ fn decode_qr(img: &mut DynamicImage) -> Result<String, anyhow::Error> {
     }
 }
 
-fn parse_uri(uri: &String) -> Result<()> {
-    let url = Url::parse(uri).expect("Failed to parse URL");
 
-    if uri.contains("otpauth://") {
-        let mut path_segments = url.path_segments().expect("Failed to get path segments");
+fn main() -> Result<(), anyhow::Error> {
+    let mut otp_list:Vec<OTP> = vec![];
+    let mut lol = Reader::open("/home/adi/code/ROTP/testing/canvas.png")?
+        .with_guessed_format()?
+        .decode()?;
 
-        // The label is the first path segment after "totp/"
-        let label = path_segments.next().expect("Failed to get label");
-
-        if uri.contains("totp") {
-            let mut totp = parse_totp(&uri, &url, label.to_string(), "/lol".to_string()).unwrap();
-            println!("{}", totp.secret)
-        } else {
-            let mut hotp =
-                parse_hotp(&uri, &url, label.to_string(), "/lol".to_string(), 1000).unwrap();
-            println!("{}", hotp.secret)
-        }
-    } else {
-        panic!()
-    }
+    let uri = decode_qr(&mut lol)?;
+    println!("{}", uri);
+    let mut roblox = OTP::parse_uri(&uri).unwrap();
+    otp_list.push(roblox);
+    println!("{:?}", otp_list[0]);
     Ok(())
 }
 
-fn parse_hotp(
-    uri: &String,
-    url: &Url,
-    label: String,
-    img_path: String,
-    counter: u64,
-) -> Result<HOTP> {
-    let uri = uri.clone();
-    let url = url.clone();
-    let mut algo;
-    println!(
-        "{}",
-        format!(
-            "{}",
-            url.query_pairs()
-                .find(|(key, _)| key == "algorithm")
-                .map(|(_, value)| value.to_string())
-                .unwrap_or("SHA1".to_owned())
-                .as_str()
-        )
-    );
-    match url
-        .query_pairs()
-        .find(|(key, _)| key == "algorithm")
-        .map(|(_, value)| value.to_string())
-        .unwrap_or("SHA1".to_owned())
-        .as_str()
-    {
-        _ => algo = Algo::SHA1,
-        "SHA1" => algo = Algo::SHA1,
-        "SHA256" => algo = Algo::SHA256,
-        "SHA512" => algo = Algo::SHA512,
-    }
-    Ok(HOTP {
-        secret: url
-            .query_pairs()
-            .find(|(key, _)| key == "secret")
-            .map(|(_, value)| value.to_string())
-            .unwrap(),
-        label: label.clone(),
-        issuer: url
-            .query_pairs()
-            .find(|(key, _)| key == "issuer")
-            .map(|(_, value)| value.to_string())
-            .unwrap_or(label),
-        algo,
-        counter,
-        full_uri: uri,
-        img_path,
-    })
-}
 
-fn parse_totp(uri: &String, url: &Url, label: String, img_path: String) -> Result<TOTP> {
-    let uri = uri.clone();
-    let url = url.clone();
-    let mut algo;
-    match url
-        .query_pairs()
-        .find(|(key, _)| key == "algorithm")
-        .map(|(_, value)| value.to_string())
-        .unwrap_or("SHA1".to_owned())
-        .as_str()
-    {
-        _ => algo = Algo::SHA1,
-        "SHA1" => algo = Algo::SHA1,
-        "SHA256" => algo = Algo::SHA256,
-        "SHA512" => algo = Algo::SHA512,
-    }
 
-    let totp = TOTP {
-        secret: url
-            .query_pairs()
-            .find(|(key, _)| key == "secret")
-            .map(|(_, value)| value.to_string())
-            .unwrap(),
-        label: label.clone(),
-        issuer: url
-            .query_pairs()
-            .find(|(key, _)| key == "issuer")
-            .map(|(_, value)| value.to_string())
-            .unwrap_or(label),
-        algo,
-        step: url
-            .query_pairs()
-            .find(|(key, _)| key == "period")
-            .map(|(_, value)| value.to_string())
-            .unwrap_or("30".to_string())
-            .parse::<u32>()
-            .unwrap_or(30),
-        full_uri: uri,
-        img_path,
-    };
-    Ok(totp)
-}
+
+
+
