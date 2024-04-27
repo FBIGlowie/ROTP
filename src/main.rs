@@ -1,6 +1,7 @@
 use bardecoder::default_builder;
 use image::io::Reader;
 use image::{DynamicImage, GenericImageView};
+use storage::onboarding;
 use std::thread;
 mod otp;
 use anyhow::{Ok, Result};
@@ -47,7 +48,7 @@ impl OTP {
                 return Ok(OTP::TOTP(totp))
             } else {
                 let mut hotp =
-                    HOTP::new(&uri, &url, label.to_string(), "/wip".to_string(), 1000).unwrap();
+                    HOTP::new(&uri, &url, label.to_string(), "/wip".to_string()).unwrap();
                 return Ok(OTP::HOTP(hotp))
                 }
         } else {
@@ -79,22 +80,10 @@ impl HOTP {
         url: &Url,
         label: String,
         img_path: String,
-        counter: u64,
     ) -> Result<HOTP> {
         let uri = uri.clone();
         let url = url.clone();
         let mut algo;
-        println!(
-            "{}",
-            format!(
-                "{}",
-                url.query_pairs()
-                    .find(|(key, _)| key == "algorithm")
-                    .map(|(_, value)| value.to_string())
-                    .unwrap_or("SHA1".to_owned())
-                    .as_str()
-            )
-        );
         match url
             .query_pairs()
             .find(|(key, _)| key == "algorithm")
@@ -102,10 +91,10 @@ impl HOTP {
             .unwrap_or("SHA1".to_owned())
             .as_str()
         {
-            _ => algo = Algo::SHA1,
             "SHA1" => algo = Algo::SHA1,
             "SHA256" => algo = Algo::SHA256,
             "SHA512" => algo = Algo::SHA512,
+            _ => algo = Algo::SHA1,
         }
         Ok(HOTP {
             secret: url
@@ -120,7 +109,11 @@ impl HOTP {
                 .map(|(_, value)| value.to_string())
                 .unwrap_or(label),
             algo,
-            counter,
+            counter: url
+            .query_pairs()
+            .find(|(key, _)| key == "counter")
+            .map(|(_, value)| value.to_string())
+            .unwrap().parse::<u64>().unwrap(),
             full_uri: uri,
             img_path,
         })
@@ -149,10 +142,10 @@ impl TOTP {
             .unwrap_or("SHA1".to_owned())
             .as_str()
         {
-            _ => algo = Algo::SHA1,
             "SHA1" => algo = Algo::SHA1,
             "SHA256" => algo = Algo::SHA256,
             "SHA512" => algo = Algo::SHA512,
+            _ => algo = Algo::SHA1,
         }
     
         let totp = TOTP {
@@ -197,15 +190,14 @@ fn decode_qr(img: &mut DynamicImage) -> Result<String, anyhow::Error> {
 
 fn main() -> Result<(), anyhow::Error> {
     let mut otp_list:Vec<OTP> = vec![];
-    let mut lol = Reader::open("/home/adi/code/ROTP/testing/canvas.png")?
-        .with_guessed_format()?
-        .decode()?;
+   // let mut lol = Reader::open("/home/adi/code/ROTP/testing/ascii-art.png")?
+     //   .with_guessed_format()?
+     //   .decode()?;
 
-    let uri = decode_qr(&mut lol)?;
-    println!("{}", uri);
-    let mut roblox = OTP::parse_uri(&uri).unwrap();
-    otp_list.push(roblox);
-    println!("{:?}", otp_list[0]);
+   // let uri = decode_qr(&mut lol)?;
+
+    let on = onboarding().unwrap();
+    println!("{}", on);
     Ok(())
 }
 

@@ -18,5 +18,7 @@ ring = "0.17.8"
 rpassword = "7.3.1"
 snafu = "0.8.2"
 tar = "0.4.40"
+tempfile = "3.10.1"
+toml = "0.8.12"
 url = "2.5.0"
 
