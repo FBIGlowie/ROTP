@@ -3,8 +3,14 @@ use anyhow::{Ok, Result};
 use inquire::{Text};
 use rpassword::*;
 use snafu::prelude::*;
+use tempfile::tempfile;
+use std::arch::asm;
+use std::io::BufRead;
 use std::io::BufReader;
+use std::io::BufWriter;
 use std::io::Cursor;
+use std::os;
+use std::process::Command;
 use std::{env, path::PathBuf};
 use std::{
     env::VarError,
@@ -56,7 +62,6 @@ impl DB {
                 }
             }
         };
-
 if env_path.contains(".tar.rotp"){
     if PathBuf::from(&env_path).exists() {
             //database found exists
@@ -160,22 +165,61 @@ println!("Hello user, welcome to ROTP onboarding");
 let mut archive = vec![];
 let mut builder = Builder::new(archive);
 let secrets_data = Cursor::new("[secrets]");
-builder.append(&create_tar_header(std::path::Path::new("secrets.toml"), secrets_data.clone().into_inner().len() as u64), secrets_data);
+builder.append(&create_tar_header(std::path::Path::new("secrets.toml"), secrets_data.clone().into_inner().len() as u64), secrets_data)?;
 
-// ask the user about the prefered db location
-let path = loop {
-    let path_prompter = PathBuf::from(Text::new("Please specify a empty path to put the db in ():".into()).prompt()?);
-    if !path_prompter.exists() {
-        if path_prompter.metadata()?.permissions().readonly() {
-            println!("Path is readonly, specify one where you have write permissions"); continue;
-        } else {break path_prompter;}
+let mut pass = loop {
+    let pass_prompt = prompt_password(" !!! Please input the database password: ")?;
+    let verification_prompt = prompt_password(" !!! Please verify the database password: ")?;
+    if pass_prompt != verification_prompt {
+        println!("Verification failed, try again"); 
+        drop(pass_prompt);
+        drop(verification_prompt);
+        continue;
     } else {
-        println!("Path already contains something, specify a empty one"); continue;
+        break Secret::new(pass_prompt);
     }
 };
-println!("{:?}", path);
+
+// ask the user about the prefered db location
+let new_db_path = loop {
+    let path_prompter = PathBuf::from(Text::new("Please specify an empty path to put the db in (\".tar.rotp\" will be appended to it):".into()).prompt()?);
+    if !path_prompter.exists() {
+        match std::fs::File::create(format!("{}.tar.rotp",&path_prompter.display())) {
+            std::result::Result::Ok(_) => {
+                // File created successfully, break the loop and return the path
+                break path_prompter;
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                println!("Permission denied for path: {:?}", path_prompter);
+                // Handle the error, possibly by continuing the loop to prompt again
+                continue;
+            },
+            Err(e) => {
+                // Handle other kinds of errors
+                println!("An error occurred: {:?}", e);
+                // Continue the loop to prompt again
+                continue;
+            },
+        }
+    } else {
+        println!("Path already contains something, specify an empty one");
+        // Continue the loop to prompt again
+        continue;
+    }
+};
+println!("{}", new_db_path.display());
+
+let mut new_db_file_handle = std::fs::File::create(format!("{}.tar.rotp",&new_db_path.display()))?;
+new_db_file_handle.write(&DB::encrypt(pass, builder.into_inner()?)?)?;
+new_db_file_handle.flush()?;
 //building done at this point
-//setting the env
+//setting the env var 
+let mut env_profile = std::fs::OpenOptions::new().append(true).open(format!("{}/.profile", std::env::var("HOME")?))?;
+remove_older_profile_exports(&format!("{}/.profile", std::env::var("HOME")?))?;
+env_profile.write_all(format!("\nexport ROTP_DB={}{}",&new_db_path.display(), ".tar.rotp").as_bytes())?;
+//set the current session to the new update profile
+println!("Done!!!")
+println!("Please run this command immediatly \n source ~/.profile");
 Ok((true))
 }
 
@@ -193,7 +237,34 @@ fn create_tar_header<S: std::convert::AsRef<std::path::Path>>(name: S, size: u64
     header.set_cksum();
     header
 }
+//this will remove the older export env var entries from the ~/.profile file
+fn remove_older_profile_exports<P>(profile: &P) -> Result<()> 
+where
+    P: AsRef<std::path::Path>,
+{
+    let mut file = File::open(profile)?;
+    // Open the file for reading
+    let mut buffer = Vec::new();
 
+    // Read the whole file into the buffer
+    file.read_to_end(&mut buffer)?;
+
+    // Convert the buffer into a string
+    let content = String::from_utf8_lossy(&buffer);
+
+    // Split the content into lines, filter out the target line, and join them back
+    let modified_content = content.lines()
+        .filter(|line| !line.contains("export ROTP_DB"))
+        .collect::<Vec<&str>>()
+        .join("\n");
+    // Open the file for writing
+        let mut file = File::create(profile)?;
+
+        // Write the modified content back to the file
+        file.write_all(modified_content.as_bytes())?;
+
+    Ok(())
+}
 
 
 #[cfg(test)]
