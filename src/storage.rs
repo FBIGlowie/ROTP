@@ -3,18 +3,11 @@ use anyhow::{Ok, Result};
 use inquire::{Text};
 use rpassword::*;
 use snafu::prelude::*;
-use tempfile::tempfile;
-use std::arch::asm;
-use std::io::BufRead;
-use std::io::BufReader;
-use std::io::BufWriter;
 use std::io::Cursor;
-use std::os;
-use std::process::Command;
 use std::{env, path::PathBuf};
 use std::{
     env::VarError,
-    fs::{DirBuilder, File},
+    fs::File,
     io::{Read, Write},
 };
 use tar::{Archive, Builder, Header};
@@ -36,16 +29,16 @@ pub struct DB {
     name: String,
 }
 impl DB {
-    fn new(mut self, pass: Secret<String>) {
+    pub fn new(pass: Secret<String>) {
 
         DB {
-            path: self.get_db().unwrap(),
-            archive_handle: self.opendb(pass).unwrap(),
-            name: self.get_name().unwrap(),
+            path: DB::get_db().unwrap(),
+            archive_handle: DB::opendb(pass).unwrap(),
+            name: DB::get_name().unwrap(),
         };
     }
 
-    fn get_db(&mut self) -> Result<PathBuf> {
+    fn get_db() -> Result<PathBuf> {
         let mut env_path = match env::var("ROTP_DB") {
             //check if the the path exists by env var
             std::result::Result::Ok(val) => val,
@@ -76,7 +69,7 @@ if env_path.contains(".tar.rotp"){
         }
     }
 
-    fn get_name(&self) -> Result<String> {
+    pub fn get_name() -> Result<String> {
     match env::var("ROTP_DB") {
             //check if the the path exists by env var
             std::result::Result::Ok(val) => Ok(val),
@@ -95,9 +88,10 @@ if env_path.contains(".tar.rotp"){
         }
     }
 
-    fn opendb(&self, pass: Secret<String>) -> Result<Archive<Cursor<Vec<u8>>>> { //as of now, this will only pass out the data from the secrets file, in the future there may be images inside too
-        let mut encrypted_archive = File::open(&self.path).unwrap(); //opens a file handle than opens a archine handle
-        let mut decrypted_archive = DB::decrypt(pass, std::io::BufReader::new(encrypted_archive)).unwrap();
+    fn opendb(pass: Secret<String>) -> Result<Archive<Cursor<Vec<u8>>>> { //as of now, this will only pass out the data from the secrets file, in the future there may be images inside too
+        let mut encrypted_archive = File::open(DB::get_db()?.as_path()).unwrap(); //opens a file handle than opens a archine handle
+        let mut decrypted_archive = DB::decrypt(pass, std::io::BufReader::new(encrypted_archive)).map_err(||);
+
         //now we can get a tar handle
         let mut archive = Archive::new(std::io::Cursor::new(decrypted_archive));
         //confirm the secrets file exists
@@ -122,17 +116,15 @@ if env_path.contains(".tar.rotp"){
         Ok(encrypted_data)
     }
 
-    fn comprehend_secrets<T>(&mut self) -> Result<()>{
+    fn extract_secrets(&mut self) -> Result<(String)> {
         let mut secret_buff: String = String::new();
         for entry in self.archive_handle.entries()? {
             if entry.as_ref().unwrap().path().unwrap().to_str().unwrap() == "secrets.toml" {
                 entry?.read_to_string(&mut secret_buff)?;
             }
         }
-        let secrets_decoded = secret_buff.parse::<toml::Table>()?;
-        println!("{:?}", secrets_decoded);
 
-        Ok(())
+        Ok((secret_buff))
     }
     
     fn decrypt(pass: Secret<String>, data: std::io::BufReader<File>) -> Result<Vec<u8>> {
@@ -218,7 +210,7 @@ let mut env_profile = std::fs::OpenOptions::new().append(true).open(format!("{}/
 remove_older_profile_exports(&format!("{}/.profile", std::env::var("HOME")?))?;
 env_profile.write_all(format!("\nexport ROTP_DB={}{}",&new_db_path.display(), ".tar.rotp").as_bytes())?;
 //set the current session to the new update profile
-println!("Done!!!")
+println!("Done!!!");
 println!("Please run this command immediatly \n source ~/.profile");
 Ok((true))
 }
